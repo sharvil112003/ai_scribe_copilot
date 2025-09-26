@@ -1,0 +1,14 @@
+services:
+  medinote-api:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - CORS_ORIGIN=*
+    volumes:
+      - ./uploads:/app/uploads
+    # Uncomment if your DNS is flaky:
+    # dns: [8.8.8.8, 1.1.1.1]
+    restart: unless-stopped
