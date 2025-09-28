@@ -57,7 +57,9 @@ class RollingRecorder {
 
   Future<void> init() async {
     // Directory (scoped, app-specific)
-    final base = await getExternalStorageDirectory(); // Android; iOS returns app docs
+  final base = Platform.isAndroid
+        ? await getExternalStorageDirectory()
+        : await getApplicationDocumentsDirectory(); // Android; iOS returns app docs
     _recDir = Directory(p.join(base!.path, 'MediNote'));
     if (!await _recDir!.exists()) await _recDir!.create(recursive: true);
 

@@ -81,7 +81,7 @@ const audioChunks: Record<string, Record<string, any>> = {};
 
 // --- Helpers ---
 function presigned(sessionId: string, chunkNumber: number) {
-  const baseUrl = `http://10.78.238.98:${PORT}`;
+  const baseUrl = `http://localhost:${PORT}`;
   return {
     url: `${baseUrl}/api/upload-chunk/${sessionId}/${chunkNumber}`,
     gcsPath: `sessions/${sessionId}/chunk_${chunkNumber}.wav`,

@@ -15,7 +15,7 @@ Future<void> main() async {
   if (perm != NotificationPermission.granted) {
     await FlutterForegroundTask.requestNotificationPermission();
   }
-  await dotenv.load(fileName: ".env");
+  // await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 

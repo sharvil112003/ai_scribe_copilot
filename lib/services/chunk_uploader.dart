@@ -25,7 +25,7 @@ class ChunkUploader {
     try {
       // 1) ask API for the presigned/put URL it wants us to use
       final presignedRes = await http.post(
-        Uri.parse('${dotenv.env['BACKEND_URL']!}/api/v1/get-presigned-url'),
+        Uri.parse('http://localhost:3001/api/v1/get-presigned-url'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -64,7 +64,7 @@ class ChunkUploader {
 
       // 3) notify server the chunk arrived
       final notifyRes = await http.post(
-        Uri.parse('${dotenv.env['BACKEND_URL']!}/api/v1/notify-chunk-uploaded'),
+        Uri.parse('http://localhost:3001/api/v1/notify-chunk-uploaded'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',

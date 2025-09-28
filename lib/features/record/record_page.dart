@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -50,17 +51,20 @@ class _RecordPageState extends State<RecordPage> {
       await permissionHandler();
 
   // Use app-specific dir (safer for scoped storage)
-  final baseDir = await getExternalStorageDirectory();
+  final baseDir =Platform.isAndroid
+        ? await getExternalStorageDirectory()
+        : await getApplicationDocumentsDirectory();
   _recordingDirectory = Directory(p.join(baseDir!.path, 'MediNote'));
   if (!await _recordingDirectory!.exists()) {
     await _recordingDirectory!.create(recursive: true);
   }
 
   // Backend clients
-  _api = ApiClient(
-    baseUrl: 'http://10.78.238.98:3001', // Android emulator; on device use your LAN IP
-    authToken: 'demo_token_123',
-  );
+    final backendUrl = 'http://localhost:3001';
+    _api = ApiClient(
+      baseUrl: backendUrl,
+      authToken: 'demo_token_123',
+    );
   _queue = UploadQueue(_api);
 
 _rolling = RollingRecorder(
@@ -70,7 +74,7 @@ _rolling = RollingRecorder(
   patientId: 'patient_123',
   patientName: 'Alice Johnson',
   chunkSeconds: 5,
-  apiBase: "http://10.78.238.98:3001",      // <-- add
+  apiBase: backendUrl,      // <-- add
   authToken: "demo_token_123",  // <-- add
 );
 
