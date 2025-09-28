@@ -19,6 +19,12 @@ This project provides a full-stack solution for managing medical records, patien
 
 ---
 
+## Loom ios Demo Video
+
+For a demo of the MediNote app in action, check out this Loom video:
+
+[Watch the MediNote Demo](https://www.loom.com/share/00fe57ea33354db2a871545280cd52cf?sid=2c126d79-7051-4ac4-aac3-ac386fc308ad)
+
 ## Prerequisites
 
 Ensure you have the following installed:
