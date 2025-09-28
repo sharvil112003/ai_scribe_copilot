@@ -3,6 +3,7 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Foreground service base permission -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -38,10 +39,10 @@
         </activity>
 
         <!-- Flutter background service declaration -->
-        <!-- <service
-            android:name="id.flutter.flutter_background_service.BackgroundService"
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:exported="false"
-            android:foregroundServiceType="microphone|dataSync" /> -->
+            android:foregroundServiceType="microphone|dataSync" />
             <!-- Use 'microphone' for recording; keep 'dataSync' if you also upload in the service.
                  Remove mediaProjection/mediaPlayback unless you actually use them. -->
 
