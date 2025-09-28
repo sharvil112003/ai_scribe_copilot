@@ -3,9 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import '../../core/api_client.dart';
+import '../../core/upload_queue.dart';
+import '../../services/recording/rolling_recorder.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -22,6 +26,9 @@ class _RecordPageState extends State<RecordPage> {
     initialize(); // <-- make sure we actually set up directory & permissions
   }
 
+  late final ApiClient _api;
+  late final UploadQueue _queue;
+  RollingRecorder? _rolling;
 
   final FlutterSoundPlayer _audioPlayer = FlutterSoundPlayer();
 
@@ -35,17 +42,45 @@ class _RecordPageState extends State<RecordPage> {
   Directory? _recordingDirectory;
   int _elapsedSeconds = 0;
   Map<String, String> _durations = {};
+  Map<String, int> _sizes = {}; // bytes
+
   String? _currentlyPlayingPath;
 
   Future<void> initialize() async {
-    await permissionHandler();
-    const krecDirectory = '/storage/emulated/0/Download/MediNote';
-    _recordingDirectory = Directory(krecDirectory);
+      await permissionHandler();
 
-    if(!await _recordingDirectory!.exists()){
-      // Directory does not exist, create it
-      await _recordingDirectory?.create(recursive: true);
-    }
+  // Use app-specific dir (safer for scoped storage)
+  final baseDir = await getExternalStorageDirectory();
+  _recordingDirectory = Directory(p.join(baseDir!.path, 'MediNote'));
+  if (!await _recordingDirectory!.exists()) {
+    await _recordingDirectory!.create(recursive: true);
+  }
+
+  // Backend clients
+  _api = ApiClient(
+    baseUrl: 'http://10.78.238.98:3001', // Android emulator; on device use your LAN IP
+    authToken: 'demo_token_123',
+  );
+  _queue = UploadQueue(_api);
+
+_rolling = RollingRecorder(
+  queue: _queue,
+  api: _api,
+  userId: 'user_123',
+  patientId: 'patient_123',
+  patientName: 'Alice Johnson',
+  chunkSeconds: 5,
+  apiBase: "http://10.78.238.98:3001",      // <-- add
+  authToken: "demo_token_123",  // <-- add
+);
+
+  await _rolling!.init();
+
+  // player init (optional)
+  await _audioPlayer.openPlayer();
+
+  // preload any existing files
+  _loadRecordings();
   }
 
   Future<void> permissionHandler() async{
@@ -67,24 +102,16 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<void> startRecording() async{
-    if(!recorderInit) await permissionHandler();
+  if (!recorderInit) await permissionHandler();
+  if (!(await Permission.microphone.isGranted)) return;
 
-    if(recorderInit && !isRecording) {
-      if(await Permission.microphone.isGranted){
-        String fileName = 'recording_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.aac';
-        String path = '${_recordingDirectory?.path}/$fileName';
-      await _audioRecorder.startRecorder(
-        toFile: path,
-        codec: Codec.aacADTS,
-        );
+  await _rolling?.start();
 
-        setState(() {
-          isRecording = true;
-          _elapsedSeconds = 0;
-        });
-        _startTimer();
-      }
-    }
+  setState(() {
+    isRecording = true;
+    _elapsedSeconds = 0;
+  });
+  _startTimer();
   }
 
   void _startTimer()  {
@@ -95,61 +122,80 @@ class _RecordPageState extends State<RecordPage> {
     });
   }
 
-  Future<String> getAudioDuration(String path) async {
-    final audioPlayer = FlutterSoundPlayer();
-    await audioPlayer.openPlayer();
-    final duration = await audioPlayer.startPlayer(fromURI: path);
-    await audioPlayer.stopPlayer();
-    await audioPlayer.closePlayer();
-    final d = duration??Duration.zero;
-    return '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+ String formatDurationFromBytes(int bytes, {int bitrateBps = 64000}) {
+  // duration (s) = bits / bps
+  final seconds = (bytes * 8) / bitrateBps;
+  final total = seconds.isFinite ? seconds : 0.0;
+  final s = total.round(); // display whole seconds
+  final mm = (s ~/ 60).toString().padLeft(2, '0');
+  final ss = (s % 60).toString().padLeft(2, '0');
+  return '$mm:$ss';
+}
 
-  }
 
   Future<void> stopRecording() async{
-      await _audioRecorder.stopRecorder();
-      _stopTimer();
-      setState(() {
-        isRecording = false;
-        _elapsedSeconds = 0;
-      });
-      _loadRecordings();
+  await _rolling?.stop();
+  _stopTimer();
+  setState(() {
+    isRecording = false;
+    _elapsedSeconds = 0;
+  });
+  _loadRecordings();
     } 
   @override
   void dispose(){
-    timer?.cancel();
-    _audioPlayer.closePlayer();
-    recorderInit = false;
-    super.dispose();
+  timer?.cancel();
+  _audioPlayer.closePlayer();
+  _rolling?.dispose();
+  recorderInit = false;
+  super.dispose();
   }
 
   void _stopTimer(){
     timer?.cancel();
   }
 
-  void _loadRecordings() async {
+void _loadRecordings() async {
+  setState(() => isLoading = true);
 
-    setState(() {
-      isLoading = true;
-    });
-
-    final files = _recordingDirectory!.listSync();
-    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-    
-    Map<String, String> durations = {};
-    for(var file in files){
-      if(file is File){
-        final duration = await getAudioDuration(file.path);
-        durations[file.path] = duration;
-      }
-    }
-    
-    setState(() {
-      _recordings = files;
-      _durations = durations;
-      isLoading = false;
-    });
+  final dir = _recordingDirectory;
+  if (dir == null) {
+    setState(() => isLoading = false);
+    return;
   }
+
+  // Snapshot *.aac that actually exist
+  final files = dir
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.toLowerCase().endsWith('.aac'))
+      .where((f) => f.existsSync())
+      .toList()
+    ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+
+  final sizes = <String, int>{};
+  final durations = <String, String>{};
+
+  for (final f in files) {
+    try {
+      if (!f.existsSync()) continue;
+      final bytes = f.lengthSync();
+      sizes[f.path] = bytes;
+      durations[f.path] = formatDurationFromBytes(bytes);
+    } catch (_) {
+      // file might disappear mid-iteration; skip
+    }
+  }
+
+  if (!mounted) return;
+  setState(() {
+    _recordings = files;
+    _sizes = sizes;
+    _durations = durations;
+    isLoading = false;
+  });
+}
+
 
   String get formattedTime {
 
@@ -226,6 +272,27 @@ class _RecordPageState extends State<RecordPage> {
     });
   }
 
+  Future<void> _safeDelete(String path) async {
+  try {
+    if (_currentlyPlayingPath == path) {
+      try { await _audioPlayer.stopPlayer(); } catch (_) {}
+      setState(() {
+        isPlaying = false;
+        _currentlyPlayingPath = null;
+      });
+    }
+    final f = File(path);
+    if (await f.exists()) {
+      await f.delete();
+    }
+  } catch (_) {
+    // ignore "not found" etc.
+  } finally {
+    _loadRecordings();
+  }
+}
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -242,7 +309,9 @@ class _RecordPageState extends State<RecordPage> {
             final path = recording.path;
             final name = path.split('/').last;
             final isthisplaying = _currentlyPlayingPath == path && isPlaying;
-            final filesizeInKB = (File(path).lengthSync()/1024).toStringAsFixed(1);
+            final bytes = _sizes[path];
+            final filesizeInKB = bytes != null ? (bytes / 1024).toStringAsFixed(1) : '--';
+
             return ListTile(
               title: Text(name),
               subtitle: Column(
@@ -268,10 +337,7 @@ class _RecordPageState extends State<RecordPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(onPressed: () => _renameFile(recording), icon: Icon(Icons.edit, size: 16,)),
-                  IconButton(onPressed: () async{
-                    await File(recording.path).delete();
-                    _loadRecordings();
-                  }, icon: Icon(Icons.delete, size: 16,)),
+                  IconButton(onPressed: () => _safeDelete(recording.path), icon: Icon(Icons.delete, size: 16,)),
                 ],
               ),
               leading: IconButton(onPressed: () => _playorPauseRecording(path), icon: Icon(isthisplaying ? Icons.pause : Icons.play_arrow)),

@@ -10,77 +10,10 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
 
-/* ----------------------------- Logging utils ----------------------------- */
-
-function nowISO() {
-  return new Date().toISOString();
-}
-
-function sizeOfBody(body: any): number {
-  try {
-    if (!body) return 0;
-    if (Buffer.isBuffer(body)) return body.length;
-    if (typeof body === "string") return Buffer.byteLength(body);
-    return Buffer.byteLength(JSON.stringify(body));
-  } catch {
-    return 0;
-  }
-}
-
-function logReq(reqId: string, msg: string) {
-  // single-line logs prefixed with reqId and timestamp
-  console.log(`[${nowISO()}] [REQ ${reqId}] ${msg}`);
-}
-
-function logErr(reqId: string, e: unknown) {
-  const err = e as any;
-  console.error(
-    `[${nowISO()}] [REQ ${reqId}] ERROR: ${err?.message || err}`,
-    err?.stack ? `\n${err.stack}` : ""
-  );
-}
-
-// assign a request id + request lifecycle log
-app.use((req, res, next) => {
-  const reqId = (randomUUID && randomUUID().slice(0, 8)) || Math.random().toString(36).slice(2, 10);
-  (req as any).reqId = reqId;
-  const started = process.hrtime.bigint();
-
-  // NOTE: body size is computed after parsers have run; to get raw sizes, use a raw parser early.
-  res.on("finish", () => {
-    const durMs = Number((process.hrtime.bigint() - started) / BigInt(1_000_000));
-    const bSize = sizeOfBody((req as any).body);
-    logReq(
-      reqId,
-      `${req.method} ${req.originalUrl} -> ${res.statusCode} in ${durMs}ms (body=${bSize}B)`
-    );
-  });
-
-  next();
-});
-
-// Basic request metadata (method, url, ip, content-type/length)
-app.use((req, _res, next) => {
-  const reqId = (req as any).reqId;
-  const h = req.headers;
-  logReq(
-    reqId,
-    `Incoming ${req.method} ${req.originalUrl} from ${req.ip} ct=${h["content-type"] || "-"} len=${h["content-length"] || "-"}`
-  );
-  next();
-});
-
-/* --------------------------------- App ---------------------------------- */
-
 // Middleware
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*", credentials: true }));
 app.use(express.json({ limit: "50mb" }));
-app.use(
-  express.raw({
-    type: ["audio/*", "application/octet-stream"],
-    limit: "50mb",
-  })
-);
+app.use(express.raw({ type: ["audio/*", "application/octet-stream"], limit: "50mb" }));
 
 const uploadsDir = path.join(process.cwd(), "uploads");
 fs.mkdir(uploadsDir, { recursive: true }).catch(() => {});
@@ -148,7 +81,7 @@ const audioChunks: Record<string, Record<string, any>> = {};
 
 // --- Helpers ---
 function presigned(sessionId: string, chunkNumber: number) {
-  const baseUrl = `http://localhost:${PORT}`;
+  const baseUrl = `http://10.78.238.98:${PORT}`;
   return {
     url: `${baseUrl}/api/upload-chunk/${sessionId}/${chunkNumber}`,
     gcsPath: `sessions/${sessionId}/chunk_${chunkNumber}.wav`,
@@ -157,26 +90,19 @@ function presigned(sessionId: string, chunkNumber: number) {
 }
 
 function auth(req: Request, res: Response, next: NextFunction) {
-  const reqId = (req as any).reqId;
   const header = req.header("Authorization");
   const token = header?.split(" ")[1];
-  if (!token) {
-    logReq(reqId, "Auth failed: no token");
-    return res.status(401).json({ error: "Access token required" });
-  }
+  if (!token) return res.status(401).json({ error: "Access token required" });
   if (!token.startsWith("demo_") && !token.startsWith("eyJ")) {
-    logReq(reqId, `Auth failed: invalid token (${token.slice(0, 10)}...)`);
     return res.status(401).json({ error: "Invalid token format" });
   }
   (req as any).user = { id: "user_123" };
   next();
 }
 
-/* -------------------------------- Routes -------------------------------- */
-
 // --- System ---
 app.get("/health", (_req, res) => {
-  res.json({ status: "healthy", timestamp: nowISO(), version: "1.0.0" });
+  res.json({ status: "healthy", timestamp: new Date().toISOString(), version: "1.0.0" });
 });
 
 app.get("/api/docs", (_req, res) => {
@@ -203,33 +129,22 @@ app.get("/api/docs", (_req, res) => {
 
 // --- Patient Management ---
 app.get("/api/v1/patients", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const userId = String(req.query.userId || "");
-  logReq(reqId, `GET patients userId=${userId || "<missing>"}`);
   if (!userId) return res.status(400).json({ error: "userId parameter required" });
   const list = patients.filter(p => p.user_id === userId).map(p => ({ id: p.id, name: p.name }));
-  logReq(reqId, `patients -> ${list.length} rows`);
   res.json({ patients: list });
 });
 
 app.get("/api/users/asd3fd2faec", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const email = String(req.query.email || "");
-  logReq(reqId, `GET user by email=${email || "<missing>"}`);
   if (!email) return res.status(400).json({ error: "email parameter required" });
   const user = users.find(u => u.email === email);
-  if (!user) {
-    logReq(reqId, "user not found");
-    return res.status(404).json({ error: "User not found" });
-  }
-  logReq(reqId, `user found id=${user.id}`);
+  if (!user) return res.status(404).json({ error: "User not found" });
   res.json({ id: user.id });
 });
 
 app.post("/api/v1/add-patient-ext", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const { name, userId } = req.body ?? {};
-  logReq(reqId, `add-patient name=${name} userId=${userId}`);
   if (!name || !userId) return res.status(400).json({ error: "name and userId are required" });
   const id = `patient_${randomUUID()}`;
   const patient: Patient = {
@@ -238,38 +153,28 @@ app.post("/api/v1/add-patient-ext", auth, (req, res) => {
     social_history: null, previous_treatment: null
   };
   patients.push(patient);
-  logReq(reqId, `patient created id=${id}`);
   res.status(201).json({ patient });
 });
 
 app.get("/api/v1/patient-details/:patientId", auth, (req, res) => {
-  const reqId = (req as any).reqId;
-  const pid = req.params.patientId;
-  logReq(reqId, `patient-details id=${pid}`);
-  const p = patients.find(x => x.id === pid);
-  if (!p) {
-    logReq(reqId, `patient ${pid} not found`);
-    return res.status(404).json({ error: "Patient not found" });
-  }
+  const p = patients.find(x => x.id === req.params.patientId);
+  if (!p) return res.status(404).json({ error: "Patient not found" });
   res.json(p);
 });
 
 app.get("/api/v1/fetch-session-by-patient/:patientId", auth, (req, res) => {
-  const reqId = (req as any).reqId;
-  const pid = req.params.patientId;
-  const list = sessions.filter(s => s.patient_id === pid).map(s => ({
+  const list = sessions.filter(s => s.patient_id === req.params.patientId).map(s => ({
     id: s.id, date: s.date, session_title: s.session_title, session_summary: s.session_summary, start_time: s.start_time
   }));
-  logReq(reqId, `sessions by patient=${pid} -> ${list.length} rows`);
   res.json({ sessions: list });
 });
 
 app.get("/api/v1/all-session", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const userId = String(req.query.userId || "");
-  logReq(reqId, `all-session userId=${userId}`);
   if (!userId) return res.status(400).json({ error: "userId parameter required" });
   const userSessions = sessions.filter(s => s.user_id === userId);
+  const patientMap: Record<string, any> = {};
+  for (const p of patients) patientMap[p.id] = { name: p.name, pronouns: p.pronouns };
   const enriched = userSessions.map(s => {
     const p = patients.find(pp => pp.id === s.patient_id);
     return {
@@ -285,26 +190,20 @@ app.get("/api/v1/all-session", auth, (req, res) => {
       patient_pronouns: p?.pronouns ?? null
     };
   });
-  logReq(reqId, `all-session -> ${enriched.length} sessions`);
-  res.json({ sessions: enriched, patientMap: {} });
+  res.json({ sessions: enriched, patientMap });
 });
 
 // --- Templates ---
 app.get("/api/v1/fetch-default-template-ext", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const userId = String(req.query.userId || "");
-  logReq(reqId, `fetch-default-template userId=${userId}`);
   if (!userId) return res.status(400).json({ error: "userId parameter required" });
   const list = templates.filter(t => t.userId === userId).map(t => ({ id: t.id, title: t.title, type: t.type }));
-  logReq(reqId, `templates -> ${list.length} items`);
   res.json({ success: true, data: list });
 });
 
 // --- Recording / Upload ---
 app.post("/api/v1/upload-session", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const { patientId, userId, patientName, status, startTime, templateId } = req.body ?? {};
-  logReq(reqId, `upload-session patientId=${patientId} userId=${userId} patientName=${patientName} status=${status || "recording"}`);
   if (!patientId || !userId || !patientName) return res.status(400).json({ error: "patientId, userId, patientName required" });
   const sess: Session = {
     id: `session_${randomUUID()}`,
@@ -324,48 +223,38 @@ app.post("/api/v1/upload-session", auth, (req, res) => {
     clinical_notes: []
   };
   sessions.push(sess);
-  logReq(reqId, `upload-session created id=${sess.id}`);
   res.status(201).json({ id: sess.id });
 });
 
 app.post("/api/v1/get-presigned-url", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const { sessionId, chunkNumber, mimeType } = req.body ?? {};
-  logReq(reqId, `get-presigned sessionId=${sessionId} chunk=${chunkNumber} mime=${mimeType || "audio/wav"}`);
   if (!sessionId || chunkNumber === undefined) return res.status(400).json({ error: "sessionId and chunkNumber required" });
   const p = presigned(sessionId, Number(chunkNumber));
   audioChunks[sessionId] ||= {};
-  audioChunks[sessionId][String(chunkNumber)] = { uploaded: false, mimeType: mimeType ?? "audio/wav", timestamp: nowISO() };
+  audioChunks[sessionId][String(chunkNumber)] = { uploaded: false, mimeType: mimeType ?? "audio/wav", timestamp: new Date().toISOString() };
   res.json(p);
 });
 
 // Raw binary upload
 app.put("/api/upload-chunk/:sessionId/:chunkNumber", async (req, res) => {
-  const reqId = (req as any).reqId;
   const { sessionId, chunkNumber } = req.params;
   const filename = `${sessionId}_chunk_${chunkNumber}.wav`;
   const filepath = path.join(uploadsDir, filename);
-  const bytes = Buffer.isBuffer(req.body) ? req.body.length : sizeOfBody(req.body);
   try {
-    logReq(reqId, `upload-chunk start sessionId=${sessionId} chunk=${chunkNumber} bytes=${bytes} -> ${filepath}`);
     const buf = Buffer.from(req.body as any);
     await fs.writeFile(filepath, buf);
     audioChunks[sessionId] ||= {};
     audioChunks[sessionId][String(chunkNumber)] ||= {};
     audioChunks[sessionId][String(chunkNumber)].uploaded = true;
     audioChunks[sessionId][String(chunkNumber)].filepath = filepath;
-    logReq(reqId, `upload-chunk saved file=${filename} size=${buf.length}B`);
     res.status(200).send("");
   } catch (e: any) {
-    logErr(reqId, e);
     res.status(500).json({ error: "Upload failed", details: e.message });
   }
 });
 
 app.post("/api/v1/notify-chunk-uploaded", auth, (req, res) => {
-  const reqId = (req as any).reqId;
   const { sessionId, chunkNumber, isLast } = req.body ?? {};
-  logReq(reqId, `notify-chunk sessionId=${sessionId} chunk=${chunkNumber} isLast=${!!isLast}`);
   if (!sessionId || chunkNumber === undefined) return res.status(400).json({ error: "sessionId and chunkNumber required" });
   audioChunks[sessionId] ||= {};
   audioChunks[sessionId][String(chunkNumber)] ||= {};
@@ -375,16 +264,12 @@ app.post("/api/v1/notify-chunk-uploaded", auth, (req, res) => {
     if (s) {
       s.status = "processing";
       s.end_time = new Date().toISOString();
-      logReq(reqId, `session ${sessionId} marked processing`);
       setTimeout(() => {
         s.status = "completed";
         s.transcript_status = "completed";
         s.transcript = "This is a mock transcript generated for demo purposes.";
         s.session_summary = "Mock session summary.";
-        logReq(reqId, `session ${sessionId} completed (mock)`);
       }, 2000);
-    } else {
-      logReq(reqId, `session ${sessionId} not found at notify-chunk`);
     }
   }
   res.json({});
@@ -402,30 +287,15 @@ app.get("/api/debug/all-data", (_req, res) => {
 });
 
 app.get("/api/debug/chunks/:sessionId", (req, res) => {
-  const reqId = (req as any).reqId;
-  const sid = req.params.sessionId;
-  const chunks = audioChunks[sid] || {};
-  logReq(reqId, `debug chunks for ${sid} -> ${Object.keys(chunks).length} items`);
-  res.json(chunks);
+  res.json(audioChunks[req.params.sessionId] || {});
 });
 
 // 404
 app.use("*", (req, res) => {
-  const reqId = (req as any).reqId;
-  logReq(reqId, `404 ${req.method} ${req.originalUrl}`);
   res.status(404).json({ error: "Not found", details: `Endpoint ${req.method} ${req.originalUrl} not found`, availableEndpoints: "/api/docs" });
 });
 
-/* ------------------------------ Error handler ----------------------------- */
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  const reqId = (req as any).reqId || "unknown";
-  logErr(reqId, err);
-  res.status(500).json({ error: "Internal Server Error", reqId });
-});
-
-/* -------------------------------- Startup -------------------------------- */
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 MediNote Mock API (TS) running on :${PORT}`);
   console.log(`📚 Docs: http://localhost:${PORT}/api/docs`);
-  console.log(`📂 Uploads dir: ${uploadsDir}`);
 });

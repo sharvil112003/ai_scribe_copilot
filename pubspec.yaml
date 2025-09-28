@@ -27,6 +27,7 @@ dependencies:
   workmanager: ^0.5.2  # Periodic background tasks
   flutter_foreground_task: ^8.17.0
   audio_session: ^0.1.25
+  flutter_dotenv: ^5.0.2  # Environment variable management
   # App Lifecycle & State Management
   # app_lifecycle: ^0.0.4  # Better lifecycle detection
   # flutter_app_lifecycle: ^1.0.1  # Enhanced app state tracking
@@ -40,7 +41,8 @@ dependencies:
   
   # Phone Call Detection
   # phone_state: ^2.0.0  # Phone call state detection
-  
+  path: ^1.9.0
+  uuid: ^3.0.6
 
   # Storage & Queue Management  
   sqflite: ^2.3.3  # Local database for queuing
@@ -66,6 +68,10 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   integration_test:
     sdk: flutter  # For your test cases
+
+assets:
+  - assets/
+  - .env
 
 flutter:
   uses-material-design: true

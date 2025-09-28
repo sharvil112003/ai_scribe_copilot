@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+
+# env
+.env
+
+# runtime data
+uploads/*
+!uploads/.gitkeep
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
