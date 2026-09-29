@@ -246,4 +246,4 @@ The API includes endpoints for:
 
 ---
 
-This `README.md` should help guide you through the entire setup and workflow of your project. Let me know if you'd like any more details added!
+This `README.md` should help guide you through the entire setup and workflow of your project.
