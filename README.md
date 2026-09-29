@@ -245,5 +245,3 @@ The API includes endpoints for:
 * The backend uses **Docker** for containerized deployment, making it easy to deploy and scale.
 
 ---
-
-This `README.md` should help guide you through the entire setup and workflow of your project.
